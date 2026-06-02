@@ -1,3 +1,13 @@
+<<<<<<< HEAD
+Traceback (most recent call last):
+  File "E:\Pliki\Projects\DiscordBots\Tred\main.py", line 18, in <module>
+    OWNER_ID = int(os.getenv("OWNER_ID"))
+TypeError: int() argument must be a string, a bytes-like object or a real number, not 'NoneType'
+Traceback (most recent call last):
+  File "E:\Pliki\Projects\DiscordBots\Tred\main.py", line 18, in <module>
+    OWNER_ID = int(os.getenv("OWNER_ID"))
+TypeError: int() argument must be a string, a bytes-like object or a real number, not 'NoneType'
+=======
 [2026-06-02 22:28:59] [INFO    ] discord.client: logging in using static token
 [2026-06-02 22:29:00] [INFO    ] discord.gateway: Shard ID None has connected to Gateway (Session ID: 7dbd8d5860b55eed21d481f190cf24e6).
 Bot logged in as Tred#9104
@@ -7,3 +17,4 @@ Command names: ['commands', 'create', 'edit', 'delete', 'category', 'categories'
 Status set to: Did you know? NULL w SQL to nie to samo co empty string ''! NULL = unknown value, '' = known empty value
 [2026-06-02 22:35:23] [INFO    ] discord.client: logging in using static token
 [2026-06-02 22:35:24] [INFO    ] discord.gateway: Shard ID None has connected to Gateway (Session ID: 1b8bfa11fdcb562cb1c9b23cc4bd47cd).
+>>>>>>> 46b6eb79f6a9a95f77e7ed75ed4d7751e80de5f2
