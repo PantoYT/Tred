@@ -1,0 +1,8 @@
+Traceback (most recent call last):
+  File "E:\Pliki\Projects\DiscordBots\Tred\main.py", line 18, in <module>
+    OWNER_ID = int(os.getenv("OWNER_ID"))
+TypeError: int() argument must be a string, a bytes-like object or a real number, not 'NoneType'
+Traceback (most recent call last):
+  File "E:\Pliki\Projects\DiscordBots\Tred\main.py", line 18, in <module>
+    OWNER_ID = int(os.getenv("OWNER_ID"))
+TypeError: int() argument must be a string, a bytes-like object or a real number, not 'NoneType'
