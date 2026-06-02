@@ -10,46 +10,40 @@ import re
 import asyncio
 import random
 
-# -------------------------------
-# Load environment
-# -------------------------------
 load_dotenv()
-TOKEN = os.getenv("DISCORD_TOKEN")
+TOKEN    = os.getenv("DISCORD_TOKEN")
 OWNER_ID = int(os.getenv("OWNER_ID"))
 TRIVIA_FILE = pathlib.Path(__file__).parent / "trivia.json"
 
-# -------------------------------
-# Discord bot setup
-# -------------------------------
+TRED_COLOR = 0x10B981
+
 intents = discord.Intents.default()
 intents.message_content = True
 bot = commands.Bot(command_prefix=commands.when_mentioned, intents=intents)
 
-# Rave mode state
 rave_mode_active = False
-rave_task = None
-annoy_user_id = None
+rave_task        = None
+annoy_user_id    = None
 
-# -------------------------------
-# Helper functions
-# -------------------------------
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
 def load_trivia():
     if TRIVIA_FILE.exists():
         try:
             with open(TRIVIA_FILE, "r", encoding="utf-8") as f:
                 trivia_list = json.load(f)
-                needs_save = False
-                next_id = max([t.get("id", 0) for t in trivia_list], default=0) + 1
+                needs_save  = False
+                next_id     = max([t.get("id", 0) for t in trivia_list], default=0) + 1
                 for t in trivia_list:
                     if "id" not in t:
-                        t["id"] = next_id
-                        next_id += 1
-                        needs_save = True
+                        t["id"] = next_id; next_id += 1; needs_save = True
                 if needs_save:
                     save_trivia(trivia_list)
                 return trivia_list
         except json.JSONDecodeError as e:
-            print(f"Error loading trivia: {e}")
+            print(f"Błąd ładowania trivia: {e}")
             return []
     return []
 
@@ -58,710 +52,369 @@ def save_trivia(trivia_list):
         with open(TRIVIA_FILE, "w", encoding="utf-8") as f:
             json.dump(trivia_list, f, ensure_ascii=False, indent=2)
     except Exception as e:
-        print(f"Error saving trivia: {e}")
+        print(f"Błąd zapisu trivia: {e}")
 
 def get_next_id(trivia_list):
-    if not trivia_list:
-        return 1
+    if not trivia_list: return 1
     return max([t.get("id", 0) for t in trivia_list]) + 1
 
 def find_trivia_by_id(trivia_list, trivia_id):
     for t in trivia_list:
-        if t.get("id") == trivia_id:
-            return t
+        if t.get("id") == trivia_id: return t
     return None
 
-def format_category_name(name):
-    return name.strip()
-
 def categorize_contributor(count):
-    if count <= 5:
-        return "Trivia Novice"
-    elif count <= 15:
-        return "Fact Finder"
-    elif count <= 30:
-        return "Knowledge Seeker"
-    elif count <= 50:
-        return "Trivia Expert"
-    elif count <= 75:
-        return "Fact Master"
-    elif count <= 100:
-        return "Encyclopedia"
-    else:
-        return "Omniscient"
+    if count <= 5:   return "Nowicjusz"
+    if count <= 15:  return "Odkrywca Faktów"
+    if count <= 30:  return "Poszukiwacz Wiedzy"
+    if count <= 50:  return "Ekspert Trivia"
+    if count <= 75:  return "Mistrz Faktów"
+    if count <= 100: return "Encyklopedia"
+    return "Wszechwiedzączy"
 
 def clean_trivia_text(text):
-    """Remove Discord mentions and clean text for status"""
-    # Remove user mentions <@123456789> or <@!123456789>
     text = re.sub(r'<@!?\d+>', '', text)
-    # Remove role mentions <@&123456789>
     text = re.sub(r'<@&\d+>', '', text)
-    # Remove channel mentions <#123456789>
     text = re.sub(r'<#\d+>', '', text)
-    # Clean up extra spaces
-    text = ' '.join(text.split())
-    return text.strip()
+    return ' '.join(text.split()).strip()
 
 def get_daily_trivia_index(trivia_list):
-    if not trivia_list:
-        return 0
-    
-    today = datetime.now().strftime("%Y-%m-%d")
-    hash_obj = hashlib.md5(today.encode())
-    hash_int = int(hash_obj.hexdigest(), 16)
-    
+    if not trivia_list: return 0
+    today    = datetime.now().strftime("%Y-%m-%d")
+    hash_int = int(hashlib.md5(today.encode()).hexdigest(), 16)
     return hash_int % len(trivia_list)
 
 def can_modify_trivia(interaction, trivia, owner_id):
-    """Check if user can modify this trivia"""
-    if interaction.user.id == owner_id:
-        return True
-    
+    if interaction.user.id == owner_id: return True
     return interaction.user.name == trivia.get("contributor", "")
 
 def get_valid_status_trivia(trivia_list):
-    """Filter trivia that fit in status (max 128 chars after cleaning)"""
     valid = []
     for t in trivia_list:
-        cleaned_text = clean_trivia_text(t["text"])
-        status_text = f'Did you know? {cleaned_text}'
+        status_text = f'Czy wiesz, że? {clean_trivia_text(t["text"])}'
         if len(status_text) <= 128:
             valid.append(t)
     return valid
 
 async def set_status_to_trivia(trivia):
-    """Set bot status to a specific trivia"""
-    cleaned_text = clean_trivia_text(trivia["text"])
-    status_text = f'Did you know? {cleaned_text}'
-    
-    await bot.change_presence(
-        activity=discord.Activity(
-            type=discord.ActivityType.watching,
-            name=status_text
-        )
-    )
-    print(f"Status set to: {status_text}")
+    status_text = f'Czy wiesz, że? {clean_trivia_text(trivia["text"])}'
+    await bot.change_presence(activity=discord.Activity(
+        type=discord.ActivityType.watching, name=status_text
+    ))
 
 def format_rave_message(trivia):
-    """Format trivia message for rave mode (simple text, no embeds)"""
-    category = trivia.get("category", "General")
-    return f'**RAVE MODE** 🎉\nDid you know? {trivia["text"]} (Category: {category}, #{trivia["id"]})'
+    category = trivia.get("category", "Ogólne")
+    return f'**RAVE MODE** 🎉\nCzy wiesz, że? {trivia["text"]} (Kategoria: {category}, #{trivia["id"]})'
 
 async def rave_mode_loop(channel_to_spam=None):
-    """Main rave mode loop - cycles trivia every 5 seconds"""
     global rave_mode_active, annoy_user_id
-    
-    trivia_list = load_trivia()
-    valid_trivia = get_valid_status_trivia(trivia_list)
-    
-    if not valid_trivia:
-        valid_trivia = trivia_list  # Fallback to all trivia
-    
+    trivia_list  = load_trivia()
+    valid_trivia = get_valid_status_trivia(trivia_list) or trivia_list
     index = 0
-    
     while rave_mode_active:
         try:
             trivia = valid_trivia[index % len(valid_trivia)]
-            
-            # Update status
             await set_status_to_trivia(trivia)
-            
-            # Send message to channel if provided
             if channel_to_spam:
-                message_text = format_rave_message(trivia)
-                
-                # Add ping if set
-                if annoy_user_id == "everyone":
-                    message_text = f"@everyone\n{message_text}"
-                elif annoy_user_id:
-                    message_text = f"<@{annoy_user_id}>\n{message_text}"
-                
-                await channel_to_spam.send(message_text)
-            
+                msg = format_rave_message(trivia)
+                if annoy_user_id == "everyone":   msg = f"@everyone\n{msg}"
+                elif annoy_user_id:               msg = f"<@{annoy_user_id}>\n{msg}"
+                await channel_to_spam.send(msg)
             index += 1
             await asyncio.sleep(5)
-            
         except Exception as e:
-            print(f"Rave mode error: {e}")
+            print(f"Rave mode błąd: {e}")
             await asyncio.sleep(5)
 
-# -------------------------------
+# ---------------------------------------------------------------------------
 # Events
-# -------------------------------
+# ---------------------------------------------------------------------------
+
 @bot.event
 async def on_ready():
-    print(f"Bot logged in as {bot.user}")
-    
-    # List all registered commands BEFORE sync
-    print(f"Commands registered: {[cmd.name for cmd in bot.tree.get_commands()]}")
-    
+    print(f"[Tred] Zalogowano jako {bot.user}")
     try:
         synced = await bot.tree.sync()
-        print(f"Synced {len(synced)} slash commands")
-        print(f"Command names: {[cmd.name for cmd in synced]}")
+        print(f"[Tred] Zsynchronizowano {len(synced)} komend")
+        for guild in bot.guilds:
+            await bot.tree.sync(guild=guild)
     except Exception as e:
-        print(f"Failed to sync commands: {e}")
-    
+        print(f"[Tred] Błąd sync: {e}")
     trivia_list = load_trivia()
     if trivia_list:
-        valid_trivia = get_valid_status_trivia(trivia_list)
-        
-        if valid_trivia:
-            index = get_daily_trivia_index(valid_trivia)
-            daily_trivia = valid_trivia[index]
-            await set_status_to_trivia(daily_trivia)
-        else:
-            await bot.change_presence(
-                activity=discord.Activity(
-                    type=discord.ActivityType.watching,
-                    name="Tracking trivia & funfacts | /commands"
-                )
-            )
-    else:
-        await bot.change_presence(
-            activity=discord.Activity(
-                type=discord.ActivityType.watching,
-                name="Tracking trivia & funfacts | /commands"
-            )
-        )
+        valid = get_valid_status_trivia(trivia_list)
+        if valid:
+            await set_status_to_trivia(valid[get_daily_trivia_index(valid)])
+            return
+    await bot.change_presence(activity=discord.Activity(
+        type=discord.ActivityType.watching, name="Trivia i ciekawostki | /commands"
+    ))
 
-# -------------------------------
-# Commands
-# -------------------------------
-@bot.tree.command(name="commands", description="Show all available commands")
+# ---------------------------------------------------------------------------
+# Slash commands
+# ---------------------------------------------------------------------------
+
+@bot.tree.command(name="commands", description="Lista komend Tred")
 async def commands_slash(interaction: discord.Interaction):
-    embed = discord.Embed(title="Tred - Trivia & FunFacts Tracker", description="Track and share amazing trivia and funfacts!", color=0x10B981)
-    embed.add_field(name="/random", value="Display a random trivia/funfact", inline=False)
-    embed.add_field(name="/daily", value="Show today's trivia/funfact", inline=False)
-    embed.add_field(name="/category <category>", value="Show all trivia from a specific category", inline=False)
-    embed.add_field(name="/categories", value="List all available categories", inline=False)
-    embed.add_field(name="/mine", value="Show all your contributed trivia", inline=False)
-    embed.add_field(name="/create <text> <category>", value="Add a new trivia/funfact", inline=False)
-    embed.add_field(name="/edit <id> <new_text>", value="Edit your trivia (or owner can edit any)", inline=False)
-    embed.add_field(name="/delete <id>", value="Delete your trivia (or owner can delete any)", inline=False)
-    embed.add_field(name="/search <keyword>", value="Search for trivia containing a keyword", inline=False)
-    embed.add_field(name="/stats", value="Show trivia statistics", inline=False)
-    
-    owner_commands = "\n**Owner Commands:**\n"
-    owner_commands += "`/all` - Show all trivia (owner only)\n"
-    owner_commands += "`/cycle` - Cycle to next status trivia (owner only)\n"
-    owner_commands += "`/rave` - Toggle RAVE MODE (owner only)\n"
-    owner_commands += "`/shutdown` - Shutdown the bot (owner only)\n"
-    owner_commands += "`/sync` - Force sync commands (owner only)"
-    
-    embed.add_field(name="Admin", value=owner_commands, inline=False)
-    
+    embed = discord.Embed(title="Tred — Trivia & Ciekawostki", description="Zbieraj i dziel się ciekawostkami!", color=TRED_COLOR)
+    embed.add_field(name="/random",              value="Losowa ciekawostka",                        inline=False)
+    embed.add_field(name="/daily",               value="Dzisiejsza ciekawostka",                    inline=False)
+    embed.add_field(name="/category <kategoria>",value="Ciekawostki z wybranej kategorii",          inline=False)
+    embed.add_field(name="/categories",          value="Lista wszystkich kategorii",                inline=False)
+    embed.add_field(name="/mine",                value="Twoje ciekawostki",                         inline=False)
+    embed.add_field(name="/create <tekst> <kat>",value="Dodaj nową ciekawostkę",                   inline=False)
+    embed.add_field(name="/edit <id> <tekst>",   value="Edytuj swoją ciekawostkę",                 inline=False)
+    embed.add_field(name="/delete <id>",         value="Usuń swoją ciekawostkę",                   inline=False)
+    embed.add_field(name="/search <słowo>",      value="Szukaj ciekawostek po słowie kluczowym",   inline=False)
+    embed.add_field(name="/stats",               value="Statystyki trivia",                         inline=False)
+    embed.add_field(name="Owner only",           value="`/all` `/cycle` `/rave` `/sync` `/shutdown`", inline=False)
+    embed.set_footer(text="Tred • Trivia Recurrent Editor & Dump")
     await interaction.response.send_message(embed=embed)
 
-@bot.tree.command(name="create", description="Create a new trivia/funfact")
-async def create_slash(interaction: discord.Interaction, text: str, category: str):
-    """
-    Add a new trivia/funfact
-    
-    Parameters:
-    - text: The trivia/funfact text
-    - category: Category (e.g., Science, History, Nature, Technology, etc.)
-    """
+
+@bot.tree.command(name="create", description="Dodaj nową ciekawostkę")
+async def create_slash(interaction: discord.Interaction, tekst: str, kategoria: str):
     trivia_list = load_trivia()
-    
-    contributor = interaction.user.name
-    category_formatted = format_category_name(category)
-    
-    new_trivia = {
-        "id": get_next_id(trivia_list),
-        "text": text,
-        "category": category_formatted,
-        "contributor": contributor,
-        "date": datetime.now().strftime("%d/%m/%Y")
+    new_trivia  = {
+        "id":          get_next_id(trivia_list),
+        "text":        tekst,
+        "category":    kategoria.strip(),
+        "contributor": interaction.user.name,
+        "date":        datetime.now().strftime("%d/%m/%Y"),
     }
-    
     trivia_list.append(new_trivia)
     save_trivia(trivia_list)
-    
     await interaction.response.send_message(
-        f'✅ Trivia #{new_trivia["id"]} added!\n"{text}"\nCategory: {category_formatted} | Contributor: {contributor}'
+        f'✅ Ciekawostka #{new_trivia["id"]} dodana!\n"{tekst}"\nKategoria: {kategoria} · Autor: {interaction.user.name}'
     )
 
-@bot.tree.command(name="edit", description="Edit a trivia/funfact by ID")
-async def edit_slash(interaction: discord.Interaction, trivia_id: int, new_text: str):
-    """
-    Edit an existing trivia/funfact
-    
-    Parameters:
-    - trivia_id: The ID of the trivia to edit
-    - new_text: The new text for the trivia
-    """
+
+@bot.tree.command(name="edit", description="Edytuj ciekawostkę po ID")
+async def edit_slash(interaction: discord.Interaction, id: int, nowy_tekst: str):
     trivia_list = load_trivia()
-    trivia = find_trivia_by_id(trivia_list, trivia_id)
-    
+    trivia      = find_trivia_by_id(trivia_list, id)
     if not trivia:
-        await interaction.response.send_message(f"Trivia #{trivia_id} not found.", ephemeral=True)
-        return
-    
+        await interaction.response.send_message(f"❌ Nie znaleziono ciekawostki #{id}.", ephemeral=True); return
     if not can_modify_trivia(interaction, trivia, OWNER_ID):
-        await interaction.response.send_message(
-            f"You can only edit your own trivia. This trivia was contributed by {trivia.get('contributor', 'Unknown')}.",
-            ephemeral=True
-        )
-        return
-    
-    old_text = trivia["text"]
-    trivia["text"] = new_text
+        await interaction.response.send_message(f"❌ Możesz edytować tylko swoje ciekawostki.", ephemeral=True); return
+    old = trivia["text"]
+    trivia["text"] = nowy_tekst
     save_trivia(trivia_list)
-    
-    await interaction.response.send_message(
-        f'✅ Trivia #{trivia_id} updated!\nOld: "{old_text}"\nNew: "{new_text}"'
-    )
+    await interaction.response.send_message(f'✅ Ciekawostka #{id} zaktualizowana!\nStara: "{old}"\nNowa: "{nowy_tekst}"')
 
-@bot.tree.command(name="delete", description="Delete a trivia/funfact by ID")
-async def delete_slash(interaction: discord.Interaction, trivia_id: int):
-    """
-    Delete a trivia/funfact
-    
-    Parameters:
-    - trivia_id: The ID of the trivia to delete
-    """
+
+@bot.tree.command(name="delete", description="Usuń ciekawostkę po ID")
+async def delete_slash(interaction: discord.Interaction, id: int):
     trivia_list = load_trivia()
-    trivia = find_trivia_by_id(trivia_list, trivia_id)
-    
+    trivia      = find_trivia_by_id(trivia_list, id)
     if not trivia:
-        await interaction.response.send_message(f"Trivia #{trivia_id} not found.", ephemeral=True)
-        return
-    
+        await interaction.response.send_message(f"❌ Nie znaleziono ciekawostki #{id}.", ephemeral=True); return
     if not can_modify_trivia(interaction, trivia, OWNER_ID):
-        await interaction.response.send_message(
-            f"You can only delete your own trivia. This trivia was contributed by {trivia.get('contributor', 'Unknown')}.",
-            ephemeral=True
-        )
-        return
-    
+        await interaction.response.send_message("❌ Możesz usuwać tylko swoje ciekawostki.", ephemeral=True); return
     trivia_list.remove(trivia)
     save_trivia(trivia_list)
-    
-    await interaction.response.send_message(
-        f'🗑️ Trivia #{trivia_id} deleted: "{trivia["text"]}"'
-    )
+    await interaction.response.send_message(f'🗑️ Ciekawostka #{id} usunięta: "{trivia["text"]}"')
 
-@bot.tree.command(name="category", description="Show all trivia from a specific category")
-async def category_slash(interaction: discord.Interaction, category: str):
-    """
-    View all trivia from a category
-    
-    Parameters:
-    - category: The category to filter by
-    """
+
+@bot.tree.command(name="category", description="Ciekawostki z wybranej kategorii")
+async def category_slash(interaction: discord.Interaction, kategoria: str):
     trivia_list = load_trivia()
-    
     if not trivia_list:
-        await interaction.response.send_message("No trivia yet.")
-        return
-    
-    category_formatted = format_category_name(category)
-    
-    filtered = []
-    for t in trivia_list:
-        if t.get("category", "").lower() == category_formatted.lower():
-            filtered.append(t)
-    
+        await interaction.response.send_message("Brak ciekawostek."); return
+    filtered = [t for t in trivia_list if t.get("category", "").lower() == kategoria.strip().lower()]
     if not filtered:
-        await interaction.response.send_message(f"No trivia found in category '{category_formatted}'.")
-        return
-    
-    embed = discord.Embed(
-        title=f"Trivia - {category_formatted}",
-        description=f"Total: {len(filtered)} trivia item{'s' if len(filtered) != 1 else ''}",
-        color=0x10B981
-    )
-    
-    for t in filtered[:25]:  # Discord embed limit
-        contributor = t.get("contributor", "Unknown")
-        embed.add_field(
-            name=f"#{t['id']} - {contributor}",
-            value=f'{t["text"]} ({t["date"]})',
-            inline=False
-        )
-    
+        await interaction.response.send_message(f"❌ Brak ciekawostek w kategorii '{kategoria}'."); return
+    embed = discord.Embed(title=f"📂 {kategoria}", description=f"Łącznie: {len(filtered)}", color=TRED_COLOR)
+    for t in filtered[:25]:
+        embed.add_field(name=f"#{t['id']} — {t.get('contributor','?')}", value=f'{t["text"]} ({t["date"]})', inline=False)
     if len(filtered) > 25:
-        embed.set_footer(text=f"Showing first 25 of {len(filtered)} results")
-    
+        embed.set_footer(text=f"Pokazuję pierwsze 25 z {len(filtered)}")
     await interaction.response.send_message(embed=embed)
 
-@bot.tree.command(name="categories", description="List all available categories")
+
+@bot.tree.command(name="categories", description="Lista wszystkich kategorii")
 async def categories_slash(interaction: discord.Interaction):
     trivia_list = load_trivia()
-    
     if not trivia_list:
-        await interaction.response.send_message("No trivia yet.")
-        return
-    
+        await interaction.response.send_message("Brak ciekawostek."); return
     categories = {}
     for t in trivia_list:
-        cat = t.get("category", "Uncategorized")
+        cat = t.get("category", "Bez kategorii")
         categories[cat] = categories.get(cat, 0) + 1
-    
-    sorted_categories = sorted(categories.items(), key=lambda x: x[1], reverse=True)
-    
-    embed = discord.Embed(
-        title="Trivia Categories",
-        description=f"Total categories: {len(sorted_categories)}",
-        color=0x10B981
-    )
-    
-    category_list = "\n".join([f"**{cat}**: {count} trivia" for cat, count in sorted_categories])
-    embed.add_field(name="Available Categories", value=category_list, inline=False)
-    
+    sorted_cats = sorted(categories.items(), key=lambda x: x[1], reverse=True)
+    embed = discord.Embed(title="📋 Kategorie", description=f"Łącznie kategorii: {len(sorted_cats)}", color=TRED_COLOR)
+    cat_list = "\n".join(f"**{cat}**: {count}" for cat, count in sorted_cats)
+    embed.add_field(name="Dostępne kategorie", value=cat_list or "—", inline=False)
     await interaction.response.send_message(embed=embed)
 
-@bot.tree.command(name="search", description="Search for trivia containing a keyword")
-async def search_slash(interaction: discord.Interaction, keyword: str):
-    """
-    Search trivia by keyword
-    
-    Parameters:
-    - keyword: The keyword to search for
-    """
+
+@bot.tree.command(name="search", description="Szukaj ciekawostki po słowie kluczowym")
+async def search_slash(interaction: discord.Interaction, slowo: str):
     trivia_list = load_trivia()
-    
     if not trivia_list:
-        await interaction.response.send_message("No trivia yet.")
-        return
-    
-    keyword_lower = keyword.lower()
-    
-    filtered = []
-    for t in trivia_list:
-        if keyword_lower in t["text"].lower():
-            filtered.append(t)
-    
+        await interaction.response.send_message("Brak ciekawostek."); return
+    filtered = [t for t in trivia_list if slowo.lower() in t["text"].lower()]
     if not filtered:
-        await interaction.response.send_message(f"No trivia found containing '{keyword}'.")
-        return
-    
-    embed = discord.Embed(
-        title=f"Search Results for '{keyword}'",
-        description=f"Found: {len(filtered)} trivia item{'s' if len(filtered) != 1 else ''}",
-        color=0x10B981
-    )
-    
-    for t in filtered[:25]:  # Discord embed limit
-        contributor = t.get("contributor", "Unknown")
-        category = t.get("category", "General")
+        await interaction.response.send_message(f"❌ Brak ciekawostek zawierających '{slowo}'."); return
+    embed = discord.Embed(title=f"🔍 Wyniki dla '{slowo}'", description=f"Znaleziono: {len(filtered)}", color=TRED_COLOR)
+    for t in filtered[:25]:
         embed.add_field(
-            name=f"#{t['id']} - {category}",
-            value=f'{t["text"]}\nContributor: {contributor} ({t["date"]})',
-            inline=False
+            name=f"#{t['id']} — {t.get('category','Ogólne')}",
+            value=f'{t["text"]}\nAutor: {t.get("contributor","?")} ({t["date"]})',
+            inline=False,
         )
-    
     if len(filtered) > 25:
-        embed.set_footer(text=f"Showing first 25 of {len(filtered)} results")
-    
+        embed.set_footer(text=f"Pokazuję pierwsze 25 z {len(filtered)}")
     await interaction.response.send_message(embed=embed)
 
-@bot.tree.command(name="stats", description="Show trivia statistics")
+
+@bot.tree.command(name="stats", description="Statystyki trivia na serwerze")
 async def stats_slash(interaction: discord.Interaction):
     trivia_list = load_trivia()
-    
     if not trivia_list:
-        await interaction.response.send_message("No trivia yet.")
-        return
-    
-    # Count by contributor
+        await interaction.response.send_message("Brak ciekawostek."); return
     contributors = {}
+    categories   = {}
     for t in trivia_list:
-        contrib = t.get("contributor", "Unknown")
-        contributors[contrib] = contributors.get(contrib, 0) + 1
-    
-    # Count by category
-    categories = {}
-    for t in trivia_list:
-        cat = t.get("category", "Uncategorized")
-        categories[cat] = categories.get(cat, 0) + 1
-    
-    top_contributors = sorted(contributors.items(), key=lambda x: x[1], reverse=True)[:5]
-    top_categories = sorted(categories.items(), key=lambda x: x[1], reverse=True)[:5]
-    
-    embed = discord.Embed(
-        title="📊 Trivia Statistics",
-        description=f"Total trivia items: {len(trivia_list)}",
-        color=0x10B981
-    )
-    
-    contrib_text = "\n".join([f"**{name}**: {count} ({categorize_contributor(count)})" for name, count in top_contributors])
-    embed.add_field(name="Top Contributors", value=contrib_text, inline=False)
-    
-    cat_text = "\n".join([f"**{cat}**: {count}" for cat, count in top_categories])
-    embed.add_field(name="Top Categories", value=cat_text, inline=False)
-    
+        c = t.get("contributor", "?"); contributors[c] = contributors.get(c, 0) + 1
+        k = t.get("category", "Bez kategorii"); categories[k] = categories.get(k, 0) + 1
+    top_c = sorted(contributors.items(), key=lambda x: x[1], reverse=True)[:5]
+    top_k = sorted(categories.items(),   key=lambda x: x[1], reverse=True)[:5]
+    embed = discord.Embed(title="📊 Statystyki Trivia", description=f"Łącznie ciekawostek: {len(trivia_list)}", color=TRED_COLOR)
+    embed.add_field(name="Top autorzy", value="\n".join(f"**{n}**: {c} ({categorize_contributor(c)})" for n, c in top_c), inline=False)
+    embed.add_field(name="Top kategorie", value="\n".join(f"**{k}**: {c}" for k, c in top_k), inline=False)
     await interaction.response.send_message(embed=embed)
 
-@bot.tree.command(name="cycle", description="Cycle to next status trivia (owner only)")
-async def cycle_slash(interaction: discord.Interaction):
-    if interaction.user.id != OWNER_ID:
-        await interaction.response.send_message("Owner-only command.", ephemeral=True)
-        return
-    
-    trivia_list = load_trivia()
-    
-    if not trivia_list:
-        await interaction.response.send_message("No trivia available.", ephemeral=True)
-        return
-    
-    valid_trivia = get_valid_status_trivia(trivia_list)
-    
-    if not valid_trivia:
-        await interaction.response.send_message("No trivia short enough for status.", ephemeral=True)
-        return
-    
-    # Find current status trivia
-    current_status = None
-    if bot.activity:
-        current_status = bot.activity.name
-    
-    current_index = 0
-    
-    if current_status:
-        for i, t in enumerate(valid_trivia):
-            cleaned_text = clean_trivia_text(t["text"])
-            status_text = f'Did you know? {cleaned_text}'
-            if status_text == current_status:
-                current_index = i
-                break
-    
-    # Get next trivia (wrap around)
-    next_index = (current_index + 1) % len(valid_trivia)
-    next_trivia = valid_trivia[next_index]
-    
-    await set_status_to_trivia(next_trivia)
-    
-    cleaned_text = clean_trivia_text(next_trivia["text"])
-    await interaction.response.send_message(
-        f'Status cycled to trivia #{next_trivia["id"]}:\nDid you know? {cleaned_text}'
-    )
 
-@bot.tree.command(name="rave", description="🎉 Toggle RAVE MODE - trivia cycles every 5 seconds!")
-async def rave_slash(interaction: discord.Interaction, annoy: str = None):
-    """
-    Toggle rave mode - cycles trivia every 5 seconds!
-    
-    Parameters:
-    - annoy: Optional - user ID (1234567890) or "everyone" to ping @everyone
-    """
-    global rave_mode_active, rave_task, annoy_user_id
-    
-    if interaction.user.id != OWNER_ID:
-        await interaction.response.send_message("Owner-only command.", ephemeral=True)
-        return
-    
-    trivia_list = load_trivia()
-    if not trivia_list:
-        await interaction.response.send_message("No trivia available for rave mode!", ephemeral=True)
-        return
-    
-    if rave_mode_active:
-        # Stop rave mode
-        rave_mode_active = False
-        annoy_user_id = None
-        
-        if rave_task:
-            rave_task.cancel()
-            rave_task = None
-        
-        # Set back to daily trivia
-        valid_trivia = get_valid_status_trivia(trivia_list)
-        if valid_trivia:
-            index = get_daily_trivia_index(valid_trivia)
-            await set_status_to_trivia(valid_trivia[index])
-        
-        await interaction.response.send_message("🛑 Rave mode DISABLED. Back to chill vibes.")
-    
-    else:
-        # Start rave mode
-        rave_mode_active = True
-        
-        # Parse annoy parameter
-        if annoy:
-            annoy_lower = annoy.strip().lower()
-            if annoy_lower == "everyone":
-                annoy_user_id = "everyone"
-            else:
-                try:
-                    annoy_user_id = int(annoy.strip())
-                except ValueError:
-                    await interaction.response.send_message("Invalid format. Use user ID (1234567890) or 'everyone'", ephemeral=True)
-                    rave_mode_active = False
-                    return
-        else:
-            annoy_user_id = None
-        
-        # Determine channel to spam
-        spam_channel = interaction.channel if interaction.guild else None
-        
-        # Start the rave loop
-        rave_task = asyncio.create_task(rave_mode_loop(spam_channel))
-        
-        if spam_channel:
-            annoy_msg = ""
-            if annoy_user_id == "everyone":
-                annoy_msg = " | Pinging @everyone"
-            elif annoy_user_id:
-                annoy_msg = f" | Pinging <@{annoy_user_id}>"
-            await interaction.response.send_message(f"🎉 RAVE MODE ACTIVATED! 🎉\nTrivia cycling every 5 seconds in this channel!{annoy_msg}")
-        else:
-            await interaction.response.send_message("🎉 RAVE MODE ACTIVATED! 🎉\nStatus cycling every 5 seconds (DM mode - no messages)")
-
-
-@bot.tree.command(name="all", description="Show all trivia (owner only)")
-async def all_slash(interaction: discord.Interaction):
-    if interaction.user.id != OWNER_ID:
-        await interaction.response.send_message("Owner-only command.", ephemeral=True)
-        return
-    
-    trivia_list = load_trivia()
-    
-    if not trivia_list:
-        await interaction.response.send_message("No trivia to display.")
-        return
-    
-    embeds = []
-    current_embed = discord.Embed(title="All Trivia", color=0x10B981)
-    field_count = 0
-    
-    for t in trivia_list:
-        if field_count >= 25:
-            embeds.append(current_embed)
-            current_embed = discord.Embed(title="All Trivia (continued)", color=0x10B981)
-            field_count = 0
-        
-        contributor = t.get("contributor", "Unknown")
-        category = t.get("category", "General")
-        current_embed.add_field(
-            name=f"#{t['id']} - {category}",
-            value=f'{t["text"]}\nContributor: {contributor} ({t["date"]})',
-            inline=False
-        )
-        field_count += 1
-    
-    embeds.append(current_embed)
-    
-    await interaction.response.send_message(embed=embeds[0])
-    for embed in embeds[1:]:
-        await interaction.followup.send(embed=embed)
-
-@bot.tree.command(name="mine", description="Show all your contributed trivia")
-async def mine_slash(interaction: discord.Interaction):
-    trivia_list = load_trivia()
-    
-    if not trivia_list:
-        await interaction.response.send_message("No trivia yet.")
-        return
-    
-    user_name = interaction.user.name
-    
-    filtered = []
-    for t in trivia_list:
-        if t.get("contributor", "").lower() == user_name.lower():
-            filtered.append(t)
-    
-    if not filtered:
-        await interaction.response.send_message(f"You haven't contributed any trivia yet, {user_name}!")
-        return
-    
-    category = categorize_contributor(len(filtered))
-    
-    embed = discord.Embed(
-        title=f"Trivia by {user_name}",
-        description=f"Total: {len(filtered)} trivia item{'s' if len(filtered) != 1 else ''} - {category}",
-        color=0x10B981
-    )
-    
-    for t in filtered:
-        cat = t.get("category", "General")
-        embed.add_field(
-            name=f"#{t['id']} - {cat} ({t['date']})",
-            value=t["text"],
-            inline=False
-        )
-    
-    await interaction.response.send_message(embed=embed)
-
-@bot.tree.command(name="random", description="Display a random trivia/funfact")
+@bot.tree.command(name="random", description="Losowa ciekawostka")
 async def random_slash(interaction: discord.Interaction):
     trivia_list = load_trivia()
-    
     if not trivia_list:
-        await interaction.response.send_message("No trivia to display")
-        return
-    
-    seed = f"{datetime.now().timestamp()}{interaction.user.id}"
-    hash_obj = hashlib.md5(seed.encode())
-    hash_int = int(hash_obj.hexdigest(), 16)
-    index = hash_int % len(trivia_list)
-    
-    t = trivia_list[index]
-    contributor = t.get("contributor", "Unknown")
-    category = t.get("category", "General")
-    
-    await interaction.response.send_message(
-        f'#{t["id"]} - **{category}**\nDid you know? {t["text"]}\nContributor: {contributor} ({t["date"]})'
-    )
+        await interaction.response.send_message("Brak ciekawostek."); return
+    seed     = f"{datetime.now().timestamp()}{interaction.user.id}"
+    hash_int = int(hashlib.md5(seed.encode()).hexdigest(), 16)
+    t        = trivia_list[hash_int % len(trivia_list)]
+    embed    = discord.Embed(title="🎲 Losowa ciekawostka", description=t["text"], color=TRED_COLOR)
+    embed.add_field(name="Kategoria", value=t.get("category","Ogólne"), inline=True)
+    embed.add_field(name="Autor",     value=t.get("contributor","?"),   inline=True)
+    embed.set_footer(text=f"#{t['id']} · {t['date']} · Tred")
+    await interaction.response.send_message(embed=embed)
 
-@bot.tree.command(name="daily", description="Show today's trivia/funfact")
+
+@bot.tree.command(name="daily", description="Dzisiejsza ciekawostka")
 async def daily_slash(interaction: discord.Interaction):
     trivia_list = load_trivia()
-    
     if not trivia_list:
-        await interaction.response.send_message("No trivia to display")
-        return
-    
-    index = get_daily_trivia_index(trivia_list)
-    t = trivia_list[index]
-    contributor = t.get("contributor", "Unknown")
-    category = t.get("category", "General")
-    
-    await interaction.response.send_message(
-        f'**Daily Trivia**\n#{t["id"]} - {category}\nDid you know? {t["text"]}\nContributor: {contributor} ({t["date"]})'
-    )
+        await interaction.response.send_message("Brak ciekawostek."); return
+    t     = trivia_list[get_daily_trivia_index(trivia_list)]
+    embed = discord.Embed(title="📅 Ciekawostka dnia", description=t["text"], color=TRED_COLOR)
+    embed.add_field(name="Kategoria", value=t.get("category","Ogólne"), inline=True)
+    embed.add_field(name="Autor",     value=t.get("contributor","?"),   inline=True)
+    embed.set_footer(text=f"#{t['id']} · {t['date']} · Tred")
+    await interaction.response.send_message(embed=embed)
 
-@bot.tree.command(name="shutdown", description="Shutdown the bot (owner only)")
-async def shutdown_slash(interaction: discord.Interaction):
+
+@bot.tree.command(name="mine", description="Twoje ciekawostki")
+async def mine_slash(interaction: discord.Interaction):
+    trivia_list = load_trivia()
+    filtered    = [t for t in trivia_list if t.get("contributor","").lower() == interaction.user.name.lower()]
+    if not filtered:
+        await interaction.response.send_message(f"Nie masz jeszcze żadnych ciekawostek, {interaction.user.name}!"); return
+    rank  = categorize_contributor(len(filtered))
+    embed = discord.Embed(title=f"Ciekawostki — {interaction.user.name}", description=f"Łącznie: {len(filtered)} · {rank}", color=TRED_COLOR)
+    for t in filtered:
+        embed.add_field(name=f"#{t['id']} — {t.get('category','Ogólne')} ({t['date']})", value=t["text"], inline=False)
+    await interaction.response.send_message(embed=embed)
+
+
+@bot.tree.command(name="all", description="Wszystkie ciekawostki (owner only)")
+async def all_slash(interaction: discord.Interaction):
     if interaction.user.id != OWNER_ID:
-        await interaction.response.send_message("You don't have permission.", ephemeral=True)
-        return
-    
-    await interaction.response.send_message("Shutting down...")
-    await bot.close()
+        await interaction.response.send_message("Tylko właściciel.", ephemeral=True); return
+    trivia_list = load_trivia()
+    if not trivia_list:
+        await interaction.response.send_message("Brak ciekawostek."); return
+    embeds, current_embed, count = [], discord.Embed(title="Wszystkie ciekawostki", color=TRED_COLOR), 0
+    for t in trivia_list:
+        if count >= 25:
+            embeds.append(current_embed)
+            current_embed = discord.Embed(title="Wszystkie ciekawostki (cd.)", color=TRED_COLOR)
+            count = 0
+        current_embed.add_field(
+            name=f"#{t['id']} — {t.get('category','?')}",
+            value=f'{t["text"]}\nAutor: {t.get("contributor","?")} ({t["date"]})',
+            inline=False,
+        )
+        count += 1
+    embeds.append(current_embed)
+    await interaction.response.send_message(embed=embeds[0])
+    for e in embeds[1:]: await interaction.followup.send(embed=e)
 
-@bot.tree.command(name="sync", description="Force sync slash commands (owner only)")
+
+@bot.tree.command(name="cycle", description="Następny status trivia (owner only)")
+async def cycle_slash(interaction: discord.Interaction):
+    if interaction.user.id != OWNER_ID:
+        await interaction.response.send_message("Tylko właściciel.", ephemeral=True); return
+    trivia_list  = load_trivia()
+    valid_trivia = get_valid_status_trivia(trivia_list)
+    if not valid_trivia:
+        await interaction.response.send_message("Brak ciekawostek.", ephemeral=True); return
+    current_index = 0
+    if bot.activity:
+        for i, t in enumerate(valid_trivia):
+            if f'Czy wiesz, że? {clean_trivia_text(t["text"])}' == bot.activity.name:
+                current_index = i; break
+    next_t = valid_trivia[(current_index + 1) % len(valid_trivia)]
+    await set_status_to_trivia(next_t)
+    await interaction.response.send_message(f'✅ Status → ciekawostka #{next_t["id"]}: {clean_trivia_text(next_t["text"])[:80]}')
+
+
+@bot.tree.command(name="rave", description="🎉 Rave mode — ciekawostki co 5 sekund (owner only)")
+async def rave_slash(interaction: discord.Interaction, annoy: str = None):
+    global rave_mode_active, rave_task, annoy_user_id
+    if interaction.user.id != OWNER_ID:
+        await interaction.response.send_message("Tylko właściciel.", ephemeral=True); return
+    trivia_list = load_trivia()
+    if not trivia_list:
+        await interaction.response.send_message("Brak ciekawostek!", ephemeral=True); return
+    if rave_mode_active:
+        rave_mode_active = False; annoy_user_id = None
+        if rave_task: rave_task.cancel(); rave_task = None
+        valid = get_valid_status_trivia(trivia_list)
+        if valid: await set_status_to_trivia(valid[get_daily_trivia_index(valid)])
+        await interaction.response.send_message("🛑 Rave mode wyłączony.")
+    else:
+        rave_mode_active = True
+        if annoy:
+            if annoy.strip().lower() == "everyone": annoy_user_id = "everyone"
+            else:
+                try: annoy_user_id = int(annoy.strip())
+                except ValueError:
+                    await interaction.response.send_message("❌ Zły format. Podaj ID lub 'everyone'.", ephemeral=True)
+                    rave_mode_active = False; return
+        spam_channel = interaction.channel if interaction.guild else None
+        rave_task    = asyncio.create_task(rave_mode_loop(spam_channel))
+        extra = f" | Pinguje <@{annoy_user_id}>" if annoy_user_id and annoy_user_id != "everyone" else (" | Pinguje @everyone" if annoy_user_id else "")
+        await interaction.response.send_message(f"🎉 RAVE MODE AKTYWOWANY!{extra}")
+
+
+@bot.tree.command(name="sync", description="Force sync komend (owner only)")
 async def sync_slash(interaction: discord.Interaction):
     if interaction.user.id != OWNER_ID:
-        await interaction.response.send_message("You don't have permission.", ephemeral=True)
-        return
-    
+        await interaction.response.send_message("Tylko właściciel.", ephemeral=True); return
     await interaction.response.defer(ephemeral=True)
-    
-    try:
-        # Sync globally
-        synced = await bot.tree.sync()
-        
-        # Also sync to current guild for immediate effect
-        if interaction.guild:
-            guild_synced = await bot.tree.sync(guild=interaction.guild)
-            await interaction.followup.send(
-                f"✅ Synced {len(synced)} global commands\n"
-                f"✅ Synced {len(guild_synced)} commands to this server\n"
-                f"Commands should appear immediately!",
-                ephemeral=True
-            )
-        else:
-            await interaction.followup.send(
-                f"✅ Synced {len(synced)} global commands",
-                ephemeral=True
-            )
-    except Exception as e:
-        await interaction.followup.send(f"❌ Sync failed: {e}", ephemeral=True)
+    synced = await bot.tree.sync()
+    if interaction.guild: await bot.tree.sync(guild=interaction.guild)
+    await interaction.followup.send(f"✅ Zsynchronizowano {len(synced)} komend", ephemeral=True)
 
-# -------------------------------
-# Run the bot
-# -------------------------------
+
+@bot.tree.command(name="shutdown", description="Wyłącz Tred (owner only)")
+async def shutdown_slash(interaction: discord.Interaction):
+    if interaction.user.id != OWNER_ID:
+        await interaction.response.send_message("Nie masz uprawnień.", ephemeral=True); return
+    await interaction.response.send_message("Wyłączam Tred...")
+    await bot.close()
+
+
 if __name__ == "__main__":
     bot.run(TOKEN)
